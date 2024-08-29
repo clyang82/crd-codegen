@@ -8,7 +8,8 @@ import (
 
 	"encoding/json"
 
-	apiextv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"github.com/invopop/jsonschema"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -24,7 +25,7 @@ type JSONSchema struct {
 	Ref         string                                   `json:"$ref"`
 	ID          string                                   `json:"$id"`
 	Title       string                                   `json:"$title"`
-	Definitions map[string]apiextv1beta1.JSONSchemaProps `json:"definitions"`
+	Definitions map[string]apiextv1.JSONSchemaProps `json:"definitions"`
 }
 
 var sch = runtime.NewScheme()
@@ -32,10 +33,10 @@ var sch = runtime.NewScheme()
 func init() {
 	metav1.AddToGroupVersion(sch, schema.GroupVersion{Version: "v1"})
 	utilruntime.Must(scheme.AddToScheme(sch))
-	utilruntime.Must(apiextv1beta1.AddToScheme(sch))
+	utilruntime.Must(apiextv1.AddToScheme(sch))
 }
 
-func decodeCRD(jsonBytes []byte) (*apiextv1beta1.CustomResourceDefinition, error) {
+func decodeCRD(jsonBytes []byte) (*apiextv1.CustomResourceDefinition, error) {
 	// decode as an unstructured object and then cast to CRD, since I
 	// was having issues decoding straight to the CRD obj.
 	// See https://github.com/openshift/origin/pull/21936/files
@@ -58,9 +59,9 @@ func decodeCRD(jsonBytes []byte) (*apiextv1beta1.CustomResourceDefinition, error
 		return nil, fmt.Errorf("unable to convert unstructured object to '%v': %v", gvk, err)
 	}
 
-	crd, ok := newObj.(*apiextv1beta1.CustomResourceDefinition)
+	crd, ok := newObj.(*apiextv1.CustomResourceDefinition)
 	if !ok {
-		return nil, fmt.Errorf("unable to cast %T to *apiextv1beta1.CustomResourceDefinition", obj)
+		return nil, fmt.Errorf("unable to cast %T to *apiextv1.CustomResourceDefinition", obj)
 	}
 
 	return crd, nil
@@ -82,19 +83,7 @@ func generate(in *string, out *string) {
 		log.Fatalf("error parsing crd: %v", err)
 	}
 
-	kind := crd.Spec.Names.Kind
-
-	schema := &JSONSchema{
-		Schema: "http://json-schema.org/draft-07/schema#",
-		Ref:    fmt.Sprintf("#/definitions/%s", kind),
-		ID:     kind,
-		Title:  kind,
-		//Definitions: make(map[string]JSONSchemaDefinition),
-		Definitions: make(map[string]apiextv1beta1.JSONSchemaProps),
-	}
-	crd.Spec.Validation.OpenAPIV3Schema.Type = "object"
-	crd.Spec.Validation.OpenAPIV3Schema.Description = kind
-	schema.Definitions[kind] = *crd.Spec.Validation.OpenAPIV3Schema
+	schema := jsonschema.Reflect(crd)
 
 	output, err := json.MarshalIndent(schema, "", "  ")
 	if err != nil {
